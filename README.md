@@ -5,7 +5,8 @@ Highload course project
 * [1 Тема и целевая аудитория](#1)
 * [2. Расчет нагрузки](#2)
 * [3. Глобальная балансировка нагрузки](#3)
-* [4. Локальная балансировка нагрузки](#3)
+* [4. Локальная балансировка нагрузки](#4)
+* [5. Логическая схема бд](#5)
 
 
 ## 1. Тема и целевая аудитория <a name="1"></a>
@@ -175,7 +176,33 @@ port_value: 8786
 - резервирование нод в k8s с возможностью скейлинга
 
 #### Терминация SSL
-Терминация SSL - на стороне envoy, далее весь трафик который идет на бэкенд по http или grpc
+Терминация SSL - на стороне envoy, далее весь трафик который идет на бэкенд по http или grpc, если же возникает необходимость то трафик между отдельными сервисами идет по защищенному соединению.
+
+## 5. Логическая схема бд<a name="5"></a>
+![alt text](img/avito_db.png "логическая схема")
+
+#### Размер данных
+##### Приближенный расчет:
+
+**Users:** id(bigint=8)(P_Key) + login(varchar(128)=128) + password(varchar(128)=128)) + email(varchar(128)=128) + fname(varchar(128)=128) + lname(varchar(128)=128) ~ 648 байт на строку & 200 млн строк ~ 120 Тбайт
+
+**Sessions**: id(bigint=8)(P_Key) + id_user(varchar(32)=32) + ttl(timestamp with time zone=8) ~ 48 байт на строку & 44 млн строк ~ 1.9 Тбайт
+
+*Index:* hash(id_user)
+
+**Chats:** id(bigint=8)(P_Key) + id_salesman(bigint=8) + id_buyer(bigint=8) + id_ads(bigint=8) + date(timestamp with time zone=8) ~ 40 байт на строку & (100 * 44 млн) ~ 163 Тбайт
+
+*Index:* hash(id_buyer), hash(id_salesman)
+
+**Messages:** id(bigint=8)(P_Key) + id_chat(bigint=8) + message(varchar(1024)=1024) + author(bigint=8) + is_read(bool=1) ~ 1049 байт на строку & (100 * 5 * 44 млн) ~ 20 Пбайт 
+
+*Index:* hash(id_chat)
+
+**Ads:** id(bigint=8)(P_Key) + title(varchar(40)=40) + description(varchar(1024)=1024) + date(timestamp with time zone=8) + price(bigint=8) + location(varchar(100)=100) + photos(5*varchar(100)=500) + category(bigint=8) + id_user(bigint=8) + views(bigint=8) ~ 1712 байт на строку & (44 млн * 3 (месяца) * 5) ~ 1.027 Пбайт
+
+*Index:* hash(id_user), b-tree(location)
+
+**Categories:** id(bigint=8)(P_Key) + name(varchar(100)=100) + description(varchar(100)=100) + parent(bigint=8) ~ 216 байт на строку & 10000 строк ~ 2 Гб
 
 ## Список литературы
 [1]: [Презентация Авито](https://www.avito.ru/b2b-hub/resources/files/%D0%9C%D0%B5%D0%B4%D0%B8%D0%B0%D0%BA%D0%B8%D1%82.pdf)
