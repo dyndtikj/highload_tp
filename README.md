@@ -7,7 +7,7 @@ Highload course project
 * [3. Глобальная балансировка нагрузки](#3)
 * [4. Локальная балансировка нагрузки](#4)
 * [5. Логическая схема бд](#5)
-
+* [6. Физическая схема бд](#6)
 
 ## 1. Тема и целевая аудитория <a name="1"></a>
 Авито - сервис для размещения объявлений о товарах, недвижимости, вакансиях, с возможносью удобного и быстрого поиска объявлений, чата продавца и покупателя. Ориентирован на российский рынок.
@@ -184,29 +184,64 @@ port_value: 8786
 #### Размер данных
 ##### Приближенный расчет:
 
-**Users:** id(bigint=8)(P_Key) + login(varchar(128)=128) + password(varchar(128)=128)) + email(varchar(128)=128) + fname(text(128)=256) + lname(varchar(128)=256) ~ 904 байт на строку & 200 млн строк ~ 168 Тбайт
+**Users:** id(bigint=8)(P_Key) + login(varchar(128)=128) + password(varchar(128)=128)) + email(varchar(128)=128) + fname(text(256) + lname(text(256) ~ 904 байт на строку & 200 млн строк ~ 168 Гбайт
 
-**Sessions**: id(bigint=8)(P_Key) + id_user(varchar(32)=32) + ttl(timestamp with time zone=8) ~ 48 байт на строку & 44 млн строк ~ 1.9 Тбайт
+**Sessions**: id(bigint=8)(P_Key) + id_user(varchar(32)=32) + ttl(timestamp with time zone=8) ~ 48 байт на строку & 44 млн строк ~ 1.9 Гбайт
 
-*Index:* hash(id_user)
+**Chats:** id(bigint=8)(P_Key) + id_salesman(bigint=8) + id_buyer(bigint=8) + id_ads(bigint=8) + date(timestamp with time zone=8) ~ 40 байт на строку & (100 * 44 млн) ~ 163 Гбайт
 
-**Chats:** id(bigint=8)(P_Key) + id_salesman(bigint=8) + id_buyer(bigint=8) + id_ads(bigint=8) + date(timestamp with time zone=8) ~ 40 байт на строку & (100 * 44 млн) ~ 163 Тбайт
+**Messages:** id(bigint=8)(P_Key) + id_chat(bigint=8) + message(text(1024)=2048) + author(bigint=8) + is_read(bool=1) ~ 1049 байт на строку & (100 * 5 * 44 млн) ~ 40 Тбайт 
 
-*Index:* hash(id_buyer), hash(id_salesman)
-
-**Messages:** id(bigint=8)(P_Key) + id_chat(bigint=8) + message(text(1024)=2048) + author(bigint=8) + is_read(bool=1) ~ 1049 байт на строку & (100 * 5 * 44 млн) ~ 40 Пбайт 
-
-*Index:* hash(id_chat)
-
-**Ads:** id(bigint=8)(P_Key) + title(text(40)=80) + description(text(1024)=2048) + date(timestamp with time zone=8) + price(bigint=8) + location(varchar(100)=100) + photos(5*varchar(100)=500) + category(bigint=8) + id_user(bigint=8) + views(bigint=8) ~ 1712 байт на строку & (44 млн * 3 (месяца) * 5) ~ 1.6 Пбайт
-
-*Index:* hash(id_user), b-tree(location), b-tree(date), b-tree(price), b-tree(location), hash(category), hash(id_user), b-tree(views)
+**Ads:** id(bigint=8)(P_Key) + title(text(80) + description(text(2048) + date(timestamp with time zone=8) + price(bigint=8) + location(varchar(100) + photos(5*varchar(100)=500) + category(bigint=8) + id_user(bigint=8) + views(bigint=8) ~ 1712 байт на строку & (44 млн * 3 (месяца) * 5) ~ 1.6 Тбайт
 
 title и description индексируются в поисковом движке (sphinx / elacticsearch)
 
 location - точка в которой расположено объявление, включает в себя как координаты, так и описание населенного пункта, к которому привязана точка
 
-**Categories:** id(bigint=8)(P_Key) + name(text(100)=200) + description(text(100)=200) + parent(bigint=8) ~ 216 байт на строку & 10000 строк ~ 3.8 Гб
+**Categories:** id(bigint=8)(P_Key) + name(text(200) + description( 200) + parent(bigint=8) ~ 216 байт на строку & 10000 строк ~ 3.8 Гб
+
+## 6. Физическая схема бд<a name="6"></a>
+#### Индексы
+**User:** b-tree(id)(P_KEY)
+
+**Sessions:** b-tree(id)(P_KEY), hash(id_user)
+
+**Chats:** b-tree(id)(P_KEY), hash(id_buyer), hash(id_salesman)
+
+**Messages:** b-tree(id)(P_KEY), hash(id_chat)
+
+**Ads:** b-tree(id)(P_KEY), hash(id_user), b-tree(location), b-tree(date), b-tree(price), b-tree(location), hash(category), b-tree(views)
+
+title + description индексируются в поисковом движке (sphinx)
+
+**Categories:** b-tree(id)(P_KEY)
+
+![alt text](img/phys_scheme.jpg "физическая схема")
+
+#### Денормализация
+- Фотографии объявления в субд хранятся в виде массива из ссылок на файлы в s3
+
+#### Выбор субд 
+
+- Users - Postgresql
+- Categories - Postgresql
+- Chats - Tarantool
+- Messages - Tarantol
+- Sessions - Redis
+- Views - Redis
+- Ads - Postgresql + sphinx
+
+#### Клиентские библиотеки
+Основной язык бэкенда - Go, поэтому рассмотрим коннекторы для него
+
+- Postgres - pgx (лучший по бенчмаркам и позволяет настраивать кол-во коннектов к бд)
+- Tarantool - [официальный драйвер от разработчиков](https://github.com/tarantool/go-tarantool)
+- Redis - [официальный драйвер от разработчиков](https://github.com/redis/go-redis)(лучший по бенчмаркам и лучший по качеству поддержки)
+
+#### Балансировка запросов
+
+#### Схема резервного копирования
+
 
 ## Список литературы
 [1]: [Презентация Авито](https://www.avito.ru/b2b-hub/resources/files/%D0%9C%D0%B5%D0%B4%D0%B8%D0%B0%D0%BA%D0%B8%D1%82.pdf)
